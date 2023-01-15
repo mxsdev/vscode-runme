@@ -10,7 +10,7 @@ export class ShowTerminalProvider extends DisposableRegistrar implements vscode.
     super()
     
     this._disposables.push(
-      vscode.window.onDidChangeActiveTerminal(() => this.refreshStatusBarItems())
+      vscode.window.onDidCloseTerminal(() => this.refreshStatusBarItems())
     )
   }
 
