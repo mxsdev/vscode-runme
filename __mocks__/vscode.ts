@@ -39,7 +39,7 @@ export const window = {
   showNotebookDocument: vi.fn(),
   showTextDocument: vi.fn(),
   onDidChangeActiveNotebookEditor: vi.fn().mockReturnValue({ dispose: vi.fn() }),
-  onDidChangeActiveTerminal: vi.fn()
+  onDidCloseTerminal: vi.fn()
 }
 
 export const tasks = {

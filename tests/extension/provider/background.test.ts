@@ -22,7 +22,7 @@ vi.mock('vscode', () => ({
       fire = eventFired
     },
     window: {
-      onDidChangeActiveTerminal: vi.fn()
+      onDidCloseTerminal: vi.fn()
     }
   }
 }))
@@ -76,7 +76,7 @@ describe('ShowTerminalProvider', () => {
 
   it('will stop showing pid if terminal is destroyed', async () => {
     let changeActiveTerminal: (() => void)[] = []
-    vi.mocked<any>(vscode.window.onDidChangeActiveTerminal).mockImplementationOnce(c => changeActiveTerminal.push(c))
+    vi.mocked<any>(vscode.window.onDidCloseTerminal).mockImplementationOnce(c => changeActiveTerminal.push(c))
     
     vi.mocked(getMetadata).mockReturnValueOnce({ interactive: true } as any)
     vi.mocked(getTerminalByCell).mockReturnValueOnce({ processId: Promise.resolve(123) } as any)
