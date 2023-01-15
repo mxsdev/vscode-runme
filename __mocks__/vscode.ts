@@ -38,7 +38,8 @@ export const window = {
   createTerminal: vi.fn().mockReturnValue(terminal),
   showNotebookDocument: vi.fn(),
   showTextDocument: vi.fn(),
-  onDidChangeActiveNotebookEditor: vi.fn().mockReturnValue({ dispose: vi.fn() })
+  onDidChangeActiveNotebookEditor: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+  onDidChangeActiveTerminal: vi.fn()
 }
 
 export const tasks = {
@@ -66,4 +67,8 @@ export const NotebookCellData = vi.fn()
 export enum NotebookCellKind {
   Code = 1,
   Markup = 2
+}
+
+export const EventEmitter = class {
+
 }
