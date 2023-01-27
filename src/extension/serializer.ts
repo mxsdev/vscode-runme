@@ -15,7 +15,7 @@ import { GrpcTransport } from '@protobuf-ts/grpc-transport'
 
 import { Serializer } from '../types'
 
-import { DeserializeRequest, SerializeRequest, Notebook } from './grpc/types'
+import { DeserializeRequest, SerializeRequest, Notebook } from './grpc/types/parser'
 import { ParserServiceClient } from './grpc/client'
 import Languages from './languages'
 import { PLATFORM_OS } from './constants'

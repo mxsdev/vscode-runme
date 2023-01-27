@@ -20,6 +20,7 @@ import {
 } from './commands'
 import { WasmSerializer, GrpcSerializer } from './serializer'
 import { RunmeLauncherProvider } from './provider/launcher'
+import pocTerminal from './terminal/poc'
 
 export class RunmeExtension {
   async initialize(context: ExtensionContext) {
@@ -27,6 +28,7 @@ export class RunmeExtension {
     const grpcSerializer = kernel.hasExperimentEnabled('grpcSerializer')
     const serializer = grpcSerializer ? new GrpcSerializer(context) : new WasmSerializer(context)
     const treeViewer = new RunmeLauncherProvider(getDefaultWorkspace())
+    pocTerminal(context)
 
     context.subscriptions.push(
       kernel,

@@ -78,6 +78,10 @@
         "title": "Run CLI command in new terminal"
       },
       {
+        "command": "runme.pocTerminal",
+        "title": "Open Runme Poc Terminal"
+      },
+      {
         "command": "runme.resetEnv",
         "category": "Runme",
         "title": "Reset Environment Variables for current VS Code session"
