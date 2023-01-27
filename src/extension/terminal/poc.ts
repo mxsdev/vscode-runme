@@ -127,7 +127,7 @@ export class PocTerminal implements Pseudoterminal {
         if (this.buffer.length > 0) {
           this.writeEmitter.fire('\b \b')
           if (this.buffer.length > 0) {
-            this.buffer = this.buffer.substr(0, this.buffer.length - 1)
+            this.buffer = this.buffer.slice(0, this.buffer.length - 1)
           }
         }
         break
