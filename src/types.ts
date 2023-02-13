@@ -1,4 +1,4 @@
-import { NotebookCellKind } from 'vscode'
+import { Disposable, NotebookCellKind } from 'vscode'
 
 import { OutputType, ClientMessages } from './constants'
 
@@ -111,4 +111,8 @@ export interface NotebookCellAnnotations {
   closeTerminalOnSuccess: boolean
   mimeType: string
   name: string
+}
+
+export interface DisposableAsync {
+  dispose(): Promise<void>
 }

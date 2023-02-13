@@ -378,7 +378,7 @@
     "webpack-cli": "^5.0.1"
   },
   "dependencies": {
-    "@buf/stateful_runme.community_timostamm-protobuf-ts": "^2.8.2-20230119154408-6077dbdcb8b5.1",
+    "@buf/stateful_runme.community_timostamm-protobuf-ts": "^2.8.2-20230208174307-530c44fd3667.1",
     "@grpc/grpc-js": "^1.8.4",
     "@protobuf-ts/grpc-transport": "^2.8.2",
     "@protobuf-ts/runtime": "^2.8.2",

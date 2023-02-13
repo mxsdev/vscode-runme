@@ -1,9 +1,6 @@
 import {
-  IORequest,
-  IOResponse,
-  PostSessionRequest,
   Session,
-} from '@buf/stateful_runme.community_timostamm-protobuf-ts/runme/kernel/v1/kernel_pb'
+} from '../../gen/runme/runner/v1/runner_pb'
 import { ChannelCredentials } from '@grpc/grpc-js'
 import { GrpcTransport } from '@protobuf-ts/grpc-transport'
 import { DuplexStreamingCall } from '@protobuf-ts/runtime-rpc/build/types/duplex-streaming-call'
@@ -21,7 +18,6 @@ import {
 import { KernelServiceClient } from '../grpc/client'
 
 type IODuplex = DuplexStreamingCall<IORequest, IOResponse>
-
 export class PocTerminal implements Pseudoterminal {
   protected readonly host = 'localhost:8080'
   protected readonly client: KernelServiceClient

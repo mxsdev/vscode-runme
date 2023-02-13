@@ -21,17 +21,23 @@ import {
 import { WasmSerializer, GrpcSerializer } from './serializer'
 import { RunmeLauncherProvider } from './provider/launcher'
 import pocTerminal from './terminal/poc'
+import { GrpcRunner } from './runner'
 
 export class RunmeExtension {
   async initialize(context: ExtensionContext) {
     const kernel = new Kernel(context)
     const grpcSerializer = kernel.hasExperimentEnabled('grpcSerializer')
+    const grpcRunner = kernel.hasExperimentEnabled('grpcRunner')
     const serializer = grpcSerializer ? new GrpcSerializer(context) : new WasmSerializer(context)
+    const runner = grpcRunner ? new GrpcRunner() : undefined
+    kernel.setRunner(runner)
     const treeViewer = new RunmeLauncherProvider(getDefaultWorkspace())
     pocTerminal(context)
 
     context.subscriptions.push(
       kernel,
+      ...runner ? [ runner ] : [],
+
       workspace.registerNotebookSerializer(Kernel.type, serializer, {
         transientOutputs: true,
         transientCellMetadata: {

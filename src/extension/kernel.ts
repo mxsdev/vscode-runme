@@ -5,6 +5,7 @@ import {
 import { TelemetryReporter } from 'vscode-telemetry'
 
 import type { ClientMessage } from '../types'
+import type { IRunner } from './runner'
 import { ClientMessages } from '../constants'
 import { API } from '../utils/deno/api'
 
@@ -36,7 +37,10 @@ export class Kernel implements Disposable {
   )
   protected messaging = notebooks.createRendererMessaging('runme-renderer')
 
-  constructor(protected context: ExtensionContext) {
+  constructor(
+    protected context: ExtensionContext,
+    protected runner?: IRunner
+  ) {
     const config = workspace.getConfiguration('runme.experiments')
     this.#experiments.set('pseudoterminal', config.get<boolean>('pseudoterminal', false))
     this.#experiments.set('grpcSerializer', config.get<boolean>('grpcSerializer', false))
@@ -220,14 +224,24 @@ export class Kernel implements Disposable {
     exec.start(Date.now())
     let execKey = getKey(runningCell)
 
-    /**
-     * check if user is running experiment to execute shell via runme cli
-     */
+    let successfulCellExecution: boolean
+
     const hasPsuedoTerminalExperimentEnabled = this.hasExperimentEnabled('pseudoterminal')
     const terminal = this.#terminals.get(cell.document.uri.fsPath)
-    const successfulCellExecution = (hasPsuedoTerminalExperimentEnabled && terminal)
-      ? await runme.call(this, exec, terminal)
-      : await executor[execKey].call(this, exec, runningCell)
+
+    if(this.runner && !(hasPsuedoTerminalExperimentEnabled && terminal)) {
+      // successfulCellExecution = await (async function(): Promise<boolean> {
+        
+      // })()
+    } else {
+      /**
+       * check if user is running experiment to execute shell via runme cli
+       */
+      successfulCellExecution = (hasPsuedoTerminalExperimentEnabled && terminal)
+        ? await runme.call(this, exec, terminal)
+        : await executor[execKey].call(this, exec, runningCell)
+    }
+
     TelemetryReporter.sendTelemetryEvent('cell.endExecute', { 'cell.success': successfulCellExecution?.toString() })
     exec.end(successfulCellExecution)
   }
@@ -247,5 +261,9 @@ export class Kernel implements Disposable {
 
     const runmeTerminal = new ExperimentalTerminal(editor.notebook)
     this.#terminals.set(editor.notebook.uri.fsPath, runmeTerminal)
+  }
+
+  setRunner(runner: IRunner|undefined) {
+    this.runner = runner
   }
 }
