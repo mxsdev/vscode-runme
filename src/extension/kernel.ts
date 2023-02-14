@@ -1,20 +1,23 @@
+import path from 'node:path'
+
 import {
   Disposable, notebooks, window, workspace, ExtensionContext,
-  NotebookEditor, NotebookCell, NotebookCellKind, NotebookCellExecution, WorkspaceEdit, NotebookEdit, NotebookDocument
+  NotebookEditor, NotebookCell, NotebookCellKind, NotebookCellExecution, WorkspaceEdit, NotebookEdit, NotebookDocument, NotebookCellOutputItem, NotebookCellOutput, Task, TaskScope, CustomExecution, TaskRevealKind, TaskPanelKind, tasks
 } from 'vscode'
 import { TelemetryReporter } from 'vscode-telemetry'
 
-import type { ClientMessage } from '../types'
+import type { CellOutputPayload, ClientMessage } from '../types'
 import type { IRunner } from './runner'
-import { ClientMessages } from '../constants'
+import { ClientMessages, OutputType } from '../constants'
 import { API } from '../utils/deno/api'
 
 import executor, { runme } from './executors'
 import { ExperimentalTerminal } from './terminal/terminal'
-import { ENV_STORE, DENO_ACCESS_TOKEN_KEY } from './constants'
-import { resetEnv, getKey, getAnnotations, hashDocumentUri } from './utils'
+import { ENV_STORE, DENO_ACCESS_TOKEN_KEY, PLATFORM_OS } from './constants'
+import { resetEnv, getKey, getAnnotations, hashDocumentUri, getCmdShellSeq } from './utils'
 
 import './wasm/wasm_exec.js'
+import { closeTerminalByEnvID } from './executors/task'
 
 enum ConfirmationItems {
   Yes = 'Yes',
@@ -229,10 +232,147 @@ export class Kernel implements Disposable {
     const hasPsuedoTerminalExperimentEnabled = this.hasExperimentEnabled('pseudoterminal')
     const terminal = this.#terminals.get(cell.document.uri.fsPath)
 
-    if(this.runner && !(hasPsuedoTerminalExperimentEnabled && terminal)) {
-      // successfulCellExecution = await (async function(): Promise<boolean> {
+    if(
+      this.runner && 
+      !(hasPsuedoTerminalExperimentEnabled && terminal) &&
+      (execKey === 'bash' || execKey === 'sh')
+    ) {
+      // TODO: bring these to top level in new file
+      const RUNME_ID = `${runningCell.fileName}:${exec.cell.index}`
+      const LABEL_LIMIT = 15
+
+      const cwd = path.dirname(runningCell.uri.fsPath)
+      
+      successfulCellExecution = await (new Promise(async (resolve) => {
+        const runner = this.runner!
+        const cellText = exec.cell.document.getText()
+        const script = getCmdShellSeq(cellText, PLATFORM_OS)
         
-      // })()
+        const program = await runner.createProgramSession()
+
+        const annotations = getAnnotations(exec.cell)
+
+        const { interactive, mimeType, background } = annotations
+
+        if(!interactive) {
+          const MIME_TYPES_WITH_CUSTOM_RENDERERS = ['text/plain']
+          
+          const output: Buffer[] = []
+
+          const mime = mimeType || 'text/plain' as const
+
+          // adapted from `shellExecutor` in `shell.ts`
+          // TODO: vercel support
+          const handleOutput = (data: Uint8Array) => {
+            output.push(Buffer.from(data))
+
+            let item = new NotebookCellOutputItem(Buffer.concat(output), mime)
+
+            // hacky for now, maybe inheritence is a fitting pattern
+            if (script.trim().endsWith('vercel')) {
+              // TODO: vercel (see `shellExecutor`)
+            } else if (MIME_TYPES_WITH_CUSTOM_RENDERERS.includes(mime)) {
+              item = NotebookCellOutputItem.json(<CellOutputPayload<OutputType.outputItems>>{
+                type: OutputType.outputItems,
+                output: {
+                  content: Buffer.concat(output).toString('base64'),
+                  mime
+                }
+              }, OutputType.outputItems)
+            }
+            
+            exec.replaceOutput([ new NotebookCellOutput([ item ]) ])
+          }
+          
+          program.onStdoutRaw(handleOutput)
+          program.onStderrRaw(handleOutput)
+
+          exec.token.onCancellationRequested(() => {
+            program.close()
+          })
+        } else {
+          const taskExecution = new Task(
+            { type: 'shell', name: `Runme Task (${RUNME_ID})` },
+            TaskScope.Workspace,
+            cellText.length > LABEL_LIMIT
+              ? `${cellText.slice(0, LABEL_LIMIT)}...`
+              : cellText,
+            'exec',
+            new CustomExecution(async () => program)
+          )
+
+          taskExecution.isBackground = background
+          taskExecution.presentationOptions = {
+            focus: true,
+            reveal: background ? TaskRevealKind.Never : TaskRevealKind.Always,
+            panel: background ? TaskPanelKind.Dedicated : TaskPanelKind.Shared
+          }
+
+          const execution = await tasks.executeTask(taskExecution)
+
+          exec.token.onCancellationRequested(() => {
+            try {
+              // runs `program.close()` implicitly
+              execution.terminate()
+              closeTerminalByEnvID(RUNME_ID)
+            } catch (err: any) {
+              console.error(`[Runme] Failed to terminate task: ${(err as Error).message}`)
+              resolve(false)
+            }
+          })
+
+          tasks.onDidEndTaskProcess((e) => {
+            const taskId = (e.execution as any)['_id']
+            const executionId = (execution as any)['_id']
+      
+            /**
+             * ignore if
+             */
+            if (
+              /**
+               * VS Code is running a different task
+               */
+              taskId !== executionId ||
+              /**
+               * we don't have an exit code
+               */
+              typeof e.exitCode === 'undefined') {
+              return
+            }
+      
+            /**
+             * only close terminal if execution passed and desired by user
+             */
+            if (e.exitCode === 0 && annotations.closeTerminalOnSuccess) {
+              closeTerminalByEnvID(RUNME_ID)
+            }
+      
+            return resolve(!!e.exitCode)
+          })
+        }
+
+        program.onDidClose((code) => {
+          if(code) {
+            // TODO: do something with this code
+            resolve(false)
+          }
+
+          resolve(true)
+        })
+
+        await program.run({
+            // TODO: make this work on windows/if bash isn't installed/etc
+            programName: execKey,
+            script: {
+              type: 'script', script
+            },
+            envs: [
+              `RUNME_ID=${RUNME_ID}`
+            ],
+            background,
+            cwd
+        })
+      }))
     } else {
       /**
        * check if user is running experiment to execute shell via runme cli

@@ -52,22 +52,21 @@ export interface IRunner extends Disposable {
     metadata?: { [index: string]: string }
   ): Promise<IRunnerEnvironment>
 
-  run(
-    opts: RunProgramOptions
-  ): Promise<IRunnerProgramSession>
+  createProgramSession(): Promise<IRunnerProgramSession>
 }
 
-export interface IRunnerEnvironment extends DisposableAsync {
-  getRunmeSession(): Session
-  getSessionId(): string
-}
+export interface IRunnerEnvironment extends DisposableAsync { }
 
 export interface IRunnerProgramSession extends DisposableAsync, Pseudoterminal {
-  // readonly onWrite: Event<string>
-  // readonly onClose: Event<UInt32Value>
   readonly onDidErr: Event<string>
+  readonly onDidClose: Event<void | number>;
+
+  readonly onStdoutRaw: Event<Uint8Array>
+  readonly onStderrRaw: Event<Uint8Array>
 
   handleInput(message: string): Promise<void>
+
+  run(opts: RunProgramOptions): Promise<void>
 }
 
 export class GrpcRunner implements IRunner {
@@ -85,12 +84,9 @@ export class GrpcRunner implements IRunner {
     this.client = new RunnerServiceClient(this.transport)
   }
 
-  async run(
-    opts: RunProgramOptions
-  ): Promise<IRunnerProgramSession> {
+  async createProgramSession(): Promise<IRunnerProgramSession> {
     const session = new GrpcRunnerProgramSession(
-      this.client,
-      opts
+      this.client
     )
 
     this.registerChild(session)
@@ -156,39 +152,56 @@ export class GrpcRunner implements IRunner {
 // TODO: this should not be allowed to run anything if the parent (GrpcRunner)
 // runs `close` 
 export class GrpcRunnerProgramSession implements IRunnerProgramSession {
-  readonly _onDidWrite = new EventEmitter<string>()
-  readonly _onDidErr = new EventEmitter<string>()
-  readonly _onDidClose = new EventEmitter<number|void>()
+  readonly _onDidWrite  = this.register(new EventEmitter<string>())
+  readonly _onDidErr    = this.register(new EventEmitter<string>())
+  readonly _onDidClose  = this.register(new EventEmitter<number|void>())
+  readonly _onStdoutRaw = this.register(new EventEmitter<Uint8Array>())
+  readonly _onStderrRaw = this.register(new EventEmitter<Uint8Array>())
   
   readonly onDidWrite = this._onDidWrite.event
   readonly onDidErr = this._onDidErr.event
   readonly onDidClose = this._onDidClose.event
+  readonly onStdoutRaw = this._onStdoutRaw.event
+  readonly onStderrRaw = this._onStderrRaw.event
 
   private readonly session: ExecuteDuplex
 
   private exitCode: UInt32Value|undefined
 
+  private disposables: Disposable[] = []
   private isDisposed = false
 
-  // protected buffer = ''
+  protected initialized = false
 
   constructor(
     private readonly client: RunnerServiceClient,
-    protected readonly opts: RunProgramOptions
+    protected opts?: RunProgramOptions
   ) { 
     this.session = client.execute()
 
-    this.session.responses.onMessage(({ stderrData, stdoutData, exitCode }) => {
-      // TODO: web compat
-      const stderr = Buffer.from(stderrData).toString('utf-8')
-      const stdout = Buffer.from(stdoutData).toString('utf-8')
-
-      if(stdout) {
+    this.register(
+      this._onStdoutRaw.event((data) => {
+        // TODO: web compat
+        const stdout = Buffer.from(data).toString('utf-8') 
         this._onDidWrite.fire(stdout)
+      })
+    )
+
+    this.register(
+      this._onStderrRaw.event((data) => {
+        // TODO: web compat
+        const stderr = Buffer.from(data).toString('utf-8') 
+        this._onDidErr.fire(stderr)
+      })
+    )
+
+    this.session.responses.onMessage(({ stderrData, stdoutData, exitCode }) => {
+      if(stdoutData.length > 0) {
+        this._onStdoutRaw.fire(stdoutData)
       }
       
-      if(stderr) {
-        this._onDidErr.fire(stderr)
+      if(stderrData.length > 0) {
+        this._onStderrRaw.fire(stderrData)
       }
 
       if(exitCode) {
@@ -205,14 +218,24 @@ export class GrpcRunnerProgramSession implements IRunnerProgramSession {
       throw reason
     })
 
-    if(!opts.tty) {
-    // if we are a pseudoterminal, wait for terminal open before starting
+    if(opts && !opts.tty) {
+      // if we are a pseudoterminal, wait for terminal open before starting
       this.init()
     }
   }
 
-  protected init() {
-    this.session.requests.send(GrpcRunnerProgramSession.runOptionsToExecuteRequest(this.opts))
+  protected init(opts?: RunProgramOptions) {
+    if(!(opts || this.opts)) { throw new Error("No run options!") }
+    if(this.initialized) { throw new Error("Already initialized!") }
+    this.opts ??= opts
+
+    this.initialized = true
+
+    return this.session.requests.send(GrpcRunnerProgramSession.runOptionsToExecuteRequest(this.opts!))
+  }
+
+  async run(opts: RunProgramOptions): Promise<void> {
+    await this.init(opts)
   }
 
   async handleInput(data: string): Promise<void> {
@@ -266,10 +289,7 @@ export class GrpcRunnerProgramSession implements IRunnerProgramSession {
     })
   }
 
-  open(initialDimensions: TerminalDimensions | undefined): void {
-    // if we are a pseudoterminal, wait for terminal open before starting
-    this.init()
-  }
+  open(initialDimensions: TerminalDimensions | undefined): void { }
 
   async dispose(endSession = true) {
     if(this.isDisposed) return
@@ -279,6 +299,9 @@ export class GrpcRunnerProgramSession implements IRunnerProgramSession {
     }
   }
 
+  /**
+   * If `code` is undefined, this was closed manually by the user
+   */
   close(code?: UInt32Value) {
     this._onDidClose.fire(code?.value)
     this.exitCode = code
@@ -289,9 +312,18 @@ export class GrpcRunnerProgramSession implements IRunnerProgramSession {
     return this.exitCode !== undefined || this.isDisposed
   }
 
+  protected register<T extends Disposable>(disposable: T): T {
+    this.disposables.push(disposable)
+    return disposable
+  }
+
   static runOptionsToExecuteRequest(
     { programName, args, cwd, environment, script, tty, background, envs }: RunProgramOptions
   ): ExecuteRequest {
+    if(environment && !(environment instanceof GrpcRunnerEnvironment)) {
+      throw new Error("Expected gRPC environment!")
+    }
+    
     return <Partial<ExecuteRequest>>{
       arguments: args,
       envs,
@@ -330,19 +362,3 @@ export class GrpcRunnerEnvironment implements IRunnerEnvironment {
     return this.client.deleteSession({ id: this.getSessionId() })
   }
 }
-
-// export default function (context: ExtensionContext) {
-  // context.subscriptions.push(
-    // commands.registerCommand('runme.pocTerminal', () => {
-    //   const pty = new PocTerminal()
-    //   const options = <ExtensionTerminalOptions>{
-    //     name: 'Poc',
-    //     pty,
-    //     isTransient: true,
-    //   }
-
-    //   const t = window.createTerminal(options)
-    //   t.show()
-    // })
-  // )
-// }
